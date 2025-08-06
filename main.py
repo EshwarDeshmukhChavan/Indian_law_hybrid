@@ -19,32 +19,32 @@ from langchain.docstore.document import Document
 
 # Gemini API
 import google.generativeai as genai
-from dotenv import load_dotenv
 
 # Streamlit
 import streamlit as st
 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------
 # Setup
-# -----------------------------------------------------------------------------
-load_dotenv()
+# -------------------------------------------------------------------------
 nltk.download("stopwords")
 
 DATA_DIR = "data"
 INDEX_PATH = "faiss_index"
 os.makedirs(DATA_DIR, exist_ok=True)
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+# Read GEMINI API key from Streamlit secrets
+GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
-    st.error("Please set GEMINI_API_KEY in your .env file.")
+    st.error("❌ GEMINI_API_KEY not found in Streamlit secrets.")
     st.stop()
 
 genai.configure(api_key=GEMINI_API_KEY)
 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------
 # PDF Processing
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------
 def load_pdf_fast(pdf_path):
+    """Read PDF and extract all text."""
     doc = fitz.open(pdf_path)
     text = ""
     for page in doc:
@@ -52,6 +52,7 @@ def load_pdf_fast(pdf_path):
     return text
 
 def process_pdf(pdf_file):
+    """Split PDF into chunks for embeddings."""
     pdf_path = os.path.join(DATA_DIR, pdf_file)
     try:
         text = load_pdf_fast(pdf_path)
@@ -65,6 +66,7 @@ def process_pdf(pdf_file):
         return []
 
 def get_data_hash():
+    """Generate MD5 hash of all PDFs for cache checking."""
     hash_md5 = hashlib.md5()
     for pdf_file in sorted(os.listdir(DATA_DIR)):
         if pdf_file.endswith(".pdf"):
@@ -74,6 +76,7 @@ def get_data_hash():
 
 @st.cache_resource
 def create_pdf_knowledge_base():
+    """Create or load FAISS index from PDFs."""
     pdf_files = [f for f in os.listdir(DATA_DIR) if f.endswith(".pdf")]
     if not pdf_files:
         return None
@@ -105,15 +108,17 @@ def create_pdf_knowledge_base():
 
 pdf_knowledge_base = create_pdf_knowledge_base()
 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------
 # FAQ Dataset
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------
 def clean_text(text):
+    """Clean text for TF-IDF matching."""
     text = text.lower()
     text = re.sub(r"[^a-z0-9\s]", "", text)
     return re.sub(r"\s+", " ", text).strip()
 
 def load_dataset(filepath):
+    """Load FAQ dataset from JSON."""
     questions, answers = [], []
     if not os.path.exists(filepath):
         return questions, answers
@@ -138,6 +143,7 @@ else:
     faq_vectors = None
 
 def retrieve_faq_context(user_query):
+    """Find the most relevant FAQ question-answer pair."""
     if faq_vectors is None:
         return None, None
     query_vec = vectorizer.transform([clean_text(user_query)])
@@ -148,10 +154,11 @@ def retrieve_faq_context(user_query):
         return None, None
     return faq_questions[idx], faq_answers[idx]
 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------
 # Gemini AI
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------
 def get_gemini_response(user_query, mode="pdf"):
+    """Generate AI response from PDFs or FAQ."""
     context = ""
     if mode == "pdf" and pdf_knowledge_base:
         docs = pdf_knowledge_base.similarity_search(user_query, k=3)
@@ -173,9 +180,9 @@ def get_gemini_response(user_query, mode="pdf"):
     except Exception as e:
         return f"Error generating answer: {e}"
 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------
 # Streamlit UI
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------
 st.set_page_config(page_title="AI Legal Assistant", layout="wide")
 st.title("AI Legal Assistant for Indian Law")
 st.write("Ask legal questions based on Indian Constitution or IPC using uploaded documents or FAQ knowledge.")
